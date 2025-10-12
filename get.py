@@ -70,3 +70,34 @@ def get_technical_adjustments(
         })
 
     return {"technical_adjustments": results}
+
+
+
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
+class TechnicalAdjustmentRepository(BaseRepository[TechnicalAdjustment, int, CreateTechnicalAdjustment]):
+    model = TechnicalAdjustment
+
+    def list_with_related_fields(
+        self,
+        insurable_interest_set_id: int,
+        policy_term_option_id: int,
+    ) -> list[TechnicalAdjustment]:
+        """List TechnicalAdjustments with joined model field and related data."""
+
+        stmt = (
+            select(self.model)
+            .options(
+                joinedload(self.model.adjustment_model_field)
+                .joinedload(TechnicalAdjustmentModelField.technical_adjustment_field),
+                joinedload(self.model.adjustment_model_field)
+                .joinedload(TechnicalAdjustmentModelField.technical_adjustment_model_configuration),
+            )
+            .where(
+                self.model.insurable_interest_set_id == insurable_interest_set_id,
+                self.model.policy_term_option_id == policy_term_option_id,
+            )
+        )
+
+        return self._session.execute(stmt).scalars().all()
