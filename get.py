@@ -183,3 +183,45 @@ def list_technical_adjustments(
         page=page,
         page_size=page_size,
     )    
+
+@router.get(
+    "/technical-adjustments",
+    response_model=PaginatedResponse[TechnicalAdjustmentRead],  # Optional, if you have schema
+)
+def list_technical_adjustments(
+    insurable_interest_set_id: int,
+    policy_term_option_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, le=200),
+    repo: TechnicalAdjustmentRepository = Depends(get_repository(TechnicalAdjustmentRepository)),
+):
+    # ORM-level data
+    paged = repo.list_with_related_fields_paged(
+        insurable_interest_set_id=insurable_interest_set_id,
+        policy_term_option_id=policy_term_option_id,
+        page=page,
+        page_size=page_size,
+    )
+
+    results = []
+    for adj in paged.records:
+        results.append({
+            "technicalAdjustmentId": adj.id,
+            "model_name": adj.adjustment_model_field.technical_adjustment_model_configuration.model_name,
+            "insurableInterestSetId": adj.insurable_interest_set_id,
+            "policyTermOptionId": adj.policy_term_option_id,
+            "quoteOptionId": adj.quote_option_id,
+            "assetTypes": adj.asset_types or [],
+            "appliesTo": adj.applies_to,
+            "perils": adj.perils or [],
+            "insuredValueTypes": adj.insured_value_types or [],
+            "adjustmentTypeIdentifierCode": adj.adjustment_model_field.technical_adjustment_field.adjustment_type_identifier_code,
+            "adjustmentValue": adj.adjustment_value,
+            "adjustmentReason": adj.adjustment_reason,
+            "reasonCategory": adj.reason_category,
+        })
+
+    return PaginatedResponse(
+        meta=paged.meta,
+        records=results,
+    )
