@@ -101,3 +101,85 @@ class TechnicalAdjustmentRepository(BaseRepository[TechnicalAdjustment, int, Cre
         )
 
         return self._session.execute(stmt).scalars().all()
+    
+
+# ----------------------------Paginated 
+class TechnicalAdjustmentRepository(
+    BaseRepository[TechnicalAdjustment, int, CreateTechnicalAdjustment]
+):
+    model = TechnicalAdjustment
+
+    def list_with_related_fields_paged(
+        self,
+        insurable_interest_set_id: int,
+        policy_term_option_id: int,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> PaginatedResponse[TechnicalAdjustment]:
+        """
+        List TechnicalAdjustments with joined model field and related data, paginated.
+        """
+
+        # Base filter conditions
+        filters = [
+            self.model.insurable_interest_set_id == insurable_interest_set_id,
+            self.model.policy_term_option_id == policy_term_option_id,
+        ]
+
+        # Convert page number for offset calculation
+        page = max(page, 1)
+        offset = (page - 1) * page_size
+
+        # ---- Count total items ----
+        total_items = (
+            self._session.execute(
+                select(func.count()).select_from(self.model).where(*filters)
+            )
+            .scalars()
+            .one()
+        )
+
+        # ---- Fetch paginated records with joined loads ----
+        stmt = (
+            select(self.model)
+            .options(
+                joinedload(self.model.adjustment_model_field)
+                .joinedload(TechnicalAdjustmentModelField.technical_adjustment_field),
+                joinedload(self.model.adjustment_model_field)
+                .joinedload(TechnicalAdjustmentModelField.technical_adjustment_model_configuration),
+            )
+            .where(*filters)
+            .limit(page_size)
+            .offset(offset)
+        )
+
+        records = self._session.execute(stmt).scalars().all()
+
+        # ---- Pagination metadata ----
+        meta = PaginatedMeta(
+            total_items=total_items,
+            total_pages=math.ceil(total_items / page_size) if page_size else 1,
+            page_number=page,
+            page_size=page_size,
+        )
+
+        return PaginatedResponse(
+            meta=meta,
+            records=records,
+        )
+
+
+@router.get("/technical-adjustments", response_model=PaginatedResponse[TechnicalAdjustmentSchema])
+def list_technical_adjustments(
+    insurable_interest_set_id: int,
+    policy_term_option_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, le=200),
+    repo: TechnicalAdjustmentRepository = Depends(get_repository(TechnicalAdjustmentRepository)),
+):
+    return repo.list_with_related_fields_paged(
+        insurable_interest_set_id=insurable_interest_set_id,
+        policy_term_option_id=policy_term_option_id,
+        page=page,
+        page_size=page_size,
+    )    
