@@ -39,3 +39,33 @@ class TechnicalAdjustmentResponse(BaseModel):
 
 class TechnicalAdjustmentListResponse(BaseModel):
     technical_adjustments: List[TechnicalAdjustmentResponse]
+
+
+from typing import List
+
+class TechnicalAdjustmentListResponse(PaginatedResponse[TechnicalAdjustmentResponse]):
+    # The API should return "technicalAdjustments" instead of "records"
+    technical_adjustments: List[TechnicalAdjustmentResponse]
+
+    class Config:
+        populate_by_name = True  # allows using both 'records' and alias fields
+
+    def model_dump(self, **kwargs):
+        """Override dump so 'records' → 'technicalAdjustments'."""
+        data = super().model_dump(**kwargs)
+        data["technicalAdjustments"] = data.pop("records", [])
+        return data
+    
+
+@app.get("/technical-adjustments", response_model=TechnicalAdjustmentListResponse)
+def list_technical_adjustments():
+    meta = PaginatedMeta(
+        page_number=1,
+        page_size=1000,
+        total_items=1153,
+        total_pages=2,
+    )
+
+    records = []  # list of TechnicalAdjustmentResponse
+
+    return TechnicalAdjustmentListResponse(meta=meta, records=records)    
