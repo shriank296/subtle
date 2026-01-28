@@ -707,3 +707,49 @@ class PricingResultRepository(
         )
 
         return self._session.execute(statement).scalars().one_or_none()
+
+
+def get_by_quote_option_id(
+        self, quote_option_id: types.QuoteOptionId
+    ) -> M.PricingResult | None:
+        """GET PricingRequest by quote_option_id with eager loading of relationships."""
+
+        statement = (
+            select(M.PricingResult)
+            .join(
+                M.PricingRequest,
+                M.PricingRequest.pricing_request_id
+                == M.PricingResult.pricing_request_id,
+            )
+            .join(
+                M.PricingInput, M.PricingRequest.pricing_input_id == M.PricingInput.id
+            )
+            .join(
+                M.QuoteOptionInput,
+                M.PricingInput.id == M.QuoteOptionInput.pricing_input_id,
+            )
+            .options(
+                selectinload(M.PricingResult.pricing_requests)
+                .selectinload(M.PricingRequest.pricing_input)
+                .selectinload(M.PricingInput.quote_option_inputs),
+                selectinload(M.PricingResult.pricing_requests)
+                .selectinload(M.PricingRequest.pricing_input)
+                .selectinload(M.PricingInput.technical_adjustments),
+                selectinload(M.PricingResult.pricing_requests)
+                .selectinload(M.PricingRequest.pricing_input)
+                .selectinload(M.PricingInput.insurable_interests),
+                selectinload(M.PricingResult.pricing_requests)
+                .selectinload(M.PricingRequest.pricing_input)
+                .selectinload(M.PricingInput.policy_term_option),
+            )
+            .where(
+                and_(
+                    M.QuoteOptionInput.quote_option_id == quote_option_id,
+                    M.PricingResult.is_primary,
+                )
+            )
+            .order_by(desc(M.PricingRequest.created_at))
+            .limit(1)
+        )
+
+        return self._session.execute(statement).scalars().one_or_none()
