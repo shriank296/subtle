@@ -753,3 +753,37 @@ def get_by_quote_option_id(
         )
 
         return self._session.execute(statement).scalars().one_or_none()
+
+#Final version 
+
+from sqlalchemy import select, and_, desc
+from sqlalchemy.orm import selectinload
+
+def get_by_quote_option_id(
+    self, quote_option_id: types.QuoteOptionId
+) -> M.PricingResult | None:
+    """Get primary PricingResult by quote_option_id with safe eager loading."""
+
+    statement = (
+        select(M.PricingResult)
+        # joins ONLY for filtering
+        .join(M.PricingResult.pricing_request)
+        .join(M.PricingRequest.pricing_input)
+        .join(M.PricingInput.quote_option_inputs)
+        .where(
+            and_(
+                M.QuoteOptionInput.quote_option_id == quote_option_id,
+                M.PricingResult.is_primary,
+            )
+        )
+        # eager loading (minimal + correct)
+        .options(
+            selectinload(M.PricingResult.pricing_request)
+            .selectinload(M.PricingRequest.pricing_input)
+            .selectinload(M.PricingInput.quote_option_inputs)
+        )
+        .order_by(desc(M.PricingRequest.created_at))
+        .limit(1)
+    )
+
+    return self._session.execute(statement).scalars().one_or_none()
