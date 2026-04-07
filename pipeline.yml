@@ -1,0 +1,463 @@
+name: "$(Build.DefinitionName)_$(Build.SourceBranchName)_$(date:yyyyMMdd)$(rev:.r)"
+
+trigger: none
+
+resources:
+  repositories:
+    - repository: PipelineTemplates
+      type: git
+      name: CloudOps/PipelineTemplates
+      ref: refs/tags/2.0.0
+    - repository: Helpers
+      type: git
+      name: CloudOps/Helpers
+      ref: refs/tags/0.5.0
+
+parameters:
+  - name: environments
+    type: object
+    default:
+      - name: Development
+        short: dev
+        branch: develop
+        simple: npd
+      - name: Test
+        short: tst
+        branch: develop
+        simple: npd
+      - name: UAT
+        short: uat
+        branch: develop
+        simple: prd
+      - name: Production
+        short: prd
+        branch: main
+        simple: prd
+
+  - name: manual_deployment
+    displayName: Deploy Terraform on Manual Run
+    type: boolean
+    default: true
+  - name: deploy_sql_schema
+    displayName: DB Migration
+    type: boolean
+    default: false
+  - name: deploy_database_permissions
+    displayName: Deploy Database Permissions
+    type: boolean
+    default: false
+  - name: destroy
+    displayName: Destroy Environment(s)
+    type: boolean
+    default: false
+
+  - name: artifact_build_id
+    displayName: Artifact BuildID
+    default: "current"
+
+variables:
+  - name: dockerfile
+    value: source/Dockerfile
+  - name: api_specification_file_path
+    value: "source/api_definition"
+  - name: api_specification_file
+    value: "mup-cyber-rater-api.yaml"
+  - name: mend_key_vault
+    value: "kv-sds-mend-prd-01"
+  - group: var-cyberrate-app-dev-01
+
+  - name: app_name
+    value: cyberrate
+  - name: business_domain
+    value: pra
+  - name: service_name
+    value: pra
+  - name: business_unit
+    value: Underwriting
+
+  - name: container_repository
+    value: "${{ variables.app_name }}"
+  - name: container_registry
+    value: "acr-${{ variables.service_name }}-prd-01"
+  - name: repo
+    value: ${{ variables['System.TeamProject'] }}/${{ variables['Build.Repository.Name'] }}
+  - name: artifact_build_id
+    ${{ if eq(parameters.artifact_build_id, 'current') }}:
+      value: $(Build.BuildId)
+    ${{ else }}:
+      value: ${{ parameters['artifact_build_id'] }}
+
+  - name: app_deployment_container
+    value: rlm/cyberrater:255085
+  - name: iac_deployment_container
+    value: brit/iac:1.7.5-ubuntu22.04-219885
+
+  - name: brit_py_pat
+    value: $(System.AccessToken)
+
+stages:
+  - ${{ if eq(parameters.artifact_build_id, 'current')}}:
+      - stage: build
+        displayName: Build
+        dependsOn: []
+        jobs:
+          - ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+              - job: build_unit_tests
+                displayName: Unit Tests
+                pool:
+                  name: ss-build-dev-01
+                container:
+                  image: acrsdsprd01.azurecr.io/${{ variables.app_deployment_container}}
+                  endpoint: acrsdsprd01
+                steps:
+                  - template: templates/tests/python.tests.yml
+                    parameters:
+                      working_dir: $(System.DefaultWorkingDirectory)/source
+                      repo_token: $(PrivateRepoToken)
+                      repo_user: $(PrivateRepoUser)
+
+          - job: build_container
+            pool:
+              name: Azure Pipelines
+              vmImage: ubuntu-22.04
+            displayName: Container Image
+            variables:
+              - name: service_connection
+                value: "ado-${{ variables.service_name }}-app-prd-01"
+            steps:
+              - checkout: self
+              - template: generic/mendconfig.yml@PipelineTemplates
+                parameters:
+                  service_connection: ${{ variables.service_connection }}
+                  mend_key_vault: $(mend_key_vault)
+                  working_dir: source
+
+              - template: linux/docker.build.yml@PipelineTemplates
+                parameters:
+                  mend_kv_service_connection: ${{ variables.service_connection }}
+                  dockerfile: $(dockerfile)
+                  build_context: source
+                  target_container_registry_service_connection: $(container_registry)
+                  target_container_registry_url: acrsds${{ variables.business_domain }}prd01.azurecr.io
+                  container_repository: $(container_repository)
+                  tags: $(Build.BuildId)
+                  arguments: "--build-arg COMMON_PY_TOKEN=$(PrivateRepoToken) --build-arg BRIT_PY_PAT=$(BRIT_PY_PAT)"
+
+              - ${{ if notin(variables['Build.Reason'], 'PullRequest')}}:
+                  - template: linux/docker.push.yml@PipelineTemplates
+                    parameters:
+                      dockerfile: $(dockerfile)
+                      build_context: source
+                      container_registry: $(container_registry)
+                      container_repository: $(container_repository)
+
+  - ${{ if and(eq(parameters['destroy'], false), eq(variables['Build.Reason'], 'PullRequest')) }}:
+      - stage: validate
+        pool:
+          name: Azure Pipelines
+          vmImage: ubuntu-22.04
+        displayName: Validation
+        condition: and(eq(variables['Build.Reason'], 'PullRequest'), succeeded())
+        jobs:
+          - ${{ each environment in parameters.environments }}:
+              - job: validate_${{ environment.short }}
+                workspace:
+                  clean: all
+                displayName: Validate ${{ environment.name }}
+                variables:
+                  - name: service_connection
+                    value: "ado-${{ variables.service_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.app_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.business_unit }}-aad-${{ environment.simple }}-01"
+                  - group: "var-${{ variables.business_unit }}-uac-${{ environment.simple }}-01"
+                  - name: state_str_name
+                    value: "sa${{ variables.service_name }}pubtf${{ environment.short }}01"
+                  - name: state_str_container_name
+                    value: "tfstates"
+                  - name: state_file
+                    value: "${{ variables.app_name }}-app-${{ environment.simple }}.tfstate"
+                steps:
+                  - checkout: self
+                  - checkout: PipelineTemplates
+                  - checkout: Helpers
+                  - task: PowerShell@2
+                    displayName: "Convert OpenAPI Specification to JSON"
+                    name: yaml_json
+                    inputs:
+                      targetType: inline
+                      script: |
+                        yq -r -o=json $(api_specification_file) | tee openapi.json
+                      workingDirectory: $(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)
+                  - template: linux/tf.tests.yml@PipelineTemplates
+                    parameters:
+                      working_dir: $(Build.SourcesDirectory)/$(Build.Repository.Name)/infra
+                      service_connection: ${{ variables.service_connection }}
+                      env: ${{ environment.short }}
+                      state_str_name: ${{ variables.state_str_name }}
+                      state_str_container_name: ${{ variables.state_str_container_name }}
+                      state_file: ${{ variables.state_file }}
+                      env_vars:
+                        ARM_ACCESS_KEY: $(arm_access_key)
+                        TF_VAR_Repo: ${{ variables.repo }}
+                        TF_VAR_Aad_Client_Id: $(aad_client_id)
+                        TF_VAR_Aad_Client_Secret: $(aad_client_secret)
+                        TF_VAR_Uac_Client_Id: $(uac_client_id)
+                        TF_VAR_Uac_Client_Secret: $(uac_client_secret)
+                        TF_VAR_Api_Specification_Filepath: "$(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)/openapi.json"
+                        TF_VAR_Container_Image_Tag: ${{ variables.artifact_build_id }}
+
+  - ${{ if notin(variables['Build.Reason'], 'PullRequest')}}:
+      - ${{ each environment in parameters.environments }}:
+          - stage: deploy_${{ environment.short }}
+            ${{ if eq(environment.name, 'Production')}}:
+              condition: and(notin(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+            ${{ else }}:
+              condition: and(notin(variables['Build.Reason'], 'PullRequest'), succeeded())
+            displayName: ${{ environment.name }} API Deployment
+            pool:
+              name: ss-build-${{ environment.short }}-01
+            jobs:
+              - job: validate_deployment_${{ environment.short }}
+                workspace:
+                  clean: all
+                displayName: Validate ${{ environment.name }} API
+                container:
+                  image: acrsdsprd01.azurecr.io/${{ variables.iac_deployment_container }}
+                  endpoint: acrsdsprd01
+                variables:
+                  - name: service_connection
+                    value: "ado-${{ variables.service_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.app_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.business_unit }}-aad-${{ environment.simple }}-01"
+                  - group: "var-${{ variables.business_unit }}-uac-${{ environment.simple }}-01"
+                  - name: state_str_name
+                    value: "sa${{ variables.service_name }}pubtf${{ environment.short }}01"
+                  - name: state_str_container_name
+                    value: "tfstates"
+                  - name: state_file
+                    value: "${{ variables.app_name }}-app-${{ environment.simple }}.tfstate"
+                steps:
+                  - checkout: self
+                  - checkout: PipelineTemplates
+                  - checkout: Helpers
+                  - task: PowerShell@2
+                    displayName: "Convert OpenAPI Specification to JSON"
+                    name: yaml_json
+                    inputs:
+                      targetType: inline
+                      script: |
+                        yq -r -o=json $(api_specification_file) | tee openapi.json
+                      workingDirectory: $(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)
+                  - template: linux/tf.tests.yml@PipelineTemplates
+                    parameters:
+                      working_dir: $(Build.SourcesDirectory)/$(Build.Repository.Name)/infra
+                      service_connection: ${{ variables.service_connection }}
+                      env: ${{ environment.short }}
+                      state_str_name: ${{ variables.state_str_name }}
+                      state_str_container_name: ${{ variables.state_str_container_name }}
+                      state_file: ${{ variables.state_file }}
+                      container_job: true
+                      env_vars:
+                        ARM_ACCESS_KEY: $(arm_access_key)
+                        TF_VAR_Repo: ${{ variables.repo }}
+                        TF_VAR_Aad_Client_Id: $(aad_client_id)
+                        TF_VAR_Aad_Client_Secret: $(aad_client_secret)
+                        TF_VAR_Uac_Client_Id: $(uac_client_id)
+                        TF_VAR_Uac_Client_Secret: $(uac_client_secret)
+                        TF_VAR_Api_Specification_Filepath: "$(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)/openapi.json"
+                        TF_VAR_Container_Image_Tag: ${{ variables.artifact_build_id }}
+              - job: manual_validation_${{ environment.short }}
+                displayName: Review Terraform Plan - ${{ environment.name }}
+                dependsOn: validate_deployment_${{ environment.short }}
+                pool: server
+                steps:
+                  - task: ManualValidation@0
+                    displayName: Terraform ${{ environment.name }} Plan
+                    inputs:
+                      instructions: "Please review the Terraform Plan ${{ environment.short }} and resume"
+                      onTimeout: "reject"
+              - deployment: deploy_${{ environment.short }}_infra
+                workspace:
+                  clean: all
+                displayName: Deploy ${{ environment.name }} API
+                dependsOn: manual_validation_${{ environment.short }}
+                container:
+                  image: acrsdsprd01.azurecr.io/${{ variables.iac_deployment_container }}
+                  endpoint: acrsdsprd01
+                variables:
+                  - name: service_connection
+                    value: "ado-${{ variables.service_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.app_name }}-app-${{ environment.short }}-01"
+                  - group: "var-${{ variables.business_unit }}-aad-${{ environment.simple }}-01"
+                  - group: "var-${{ variables.business_unit }}-uac-${{ environment.simple }}-01"
+                  - name: state_str_name
+                    value: "sa${{ variables.service_name }}pubtf${{ environment.short }}01"
+                  - name: state_str_container_name
+                    value: "tfstates"
+                  - name: state_file
+                    value: "${{ variables.app_name }}-app-${{ environment.simple }}.tfstate"
+                environment: "${{ variables.app_name }}-${{ environment.name }}"
+                strategy:
+                  runOnce:
+                    deploy:
+                      steps:
+                        - checkout: self
+                        - checkout: PipelineTemplates
+                        - task: PowerShell@2
+                          displayName: "Convert OpenAPI Specification to JSON"
+                          name: yaml_json
+                          inputs:
+                            targetType: inline
+                            script: |
+                              yq -r -o=json $(api_specification_file) | tee openapi.json
+                            workingDirectory: $(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)
+                        - template: linux/tf.apply.yml@PipelineTemplates
+                          parameters:
+                            working_dir: $(Build.SourcesDirectory)/$(Build.Repository.Name)/infra
+                            manual_deployment: ${{ parameters.manual_deployment }}
+                            env: ${{ environment.short }}
+                            service_connection: ${{ variables.service_connection }}
+                            state_str_name: ${{ variables.state_str_name }}
+                            state_str_container_name: ${{ variables.state_str_container_name }}
+                            state_file: ${{ variables.state_file }}
+                            plan_file: false ## Having to change temporarily as plan file location changes between jobs
+                            container_job: true
+                            env_vars:
+                              ARM_ACCESS_KEY: $(arm_access_key)
+                              TF_VAR_Repo: ${{ variables.repo }}
+                              TF_VAR_Aad_Client_Id: $(aad_client_id)
+                              TF_VAR_Aad_Client_Secret: $(aad_client_secret)
+                              TF_VAR_Environment_Code: ${{ environment.short }}
+                              TF_VAR_Uac_Client_Id: $(uac_client_id)
+                              TF_VAR_Uac_Client_Secret: $(uac_client_secret)
+                              TF_VAR_Mgt_Subscription_Id: $(mgt_subscription_id)
+                              TF_VAR_Api_Specification_Filepath: "$(Build.SourcesDirectory)/$(Build.Repository.Name)/$(api_specification_file_path)/openapi.json"
+                              TF_VAR_Container_Image_Tag: ${{ variables.artifact_build_id }}
+                        - ${{ if or(eq(parameters['deploy_sql_schema'], true), eq(parameters['deploy_database_permissions'], true))}}:
+                            - task: AzureCLI@2
+                              displayName: "Collecting Terraform Outputs"
+                              condition: and(and(ne(variables['Build.Reason'], 'PullRequest'), or(ne(variables['Build.Reason'], 'Manual'), and(eq(variables['Build.Reason'], 'Manual'), eq(${{ parameters.manual_deployment }}, true)))), succeeded())
+                              name: terraform_output
+                              inputs:
+                                azureSubscription: ${{ variables.service_connection }}
+                                scriptType: "pscore"
+                                visibleAzLogin: false
+                                scriptLocation: inlineScript
+                                addSpnToEnvironment: true
+                                workingDirectory: $(Build.SourcesDirectory)/$(Build.Repository.Name)/infra
+                                inlineScript: |
+                                  # Get Service Connection Values
+                                  $env:ARM_CLIENT_ID = $env:servicePrincipalId
+                                  $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
+                                  $env:ARM_SUBSCRIPTION_ID = $(az account show --query 'id' -o tsv)
+                                  $env:ARM_TENANT_ID = $env:tenantId
+
+                                  $terraformOutputsJson = terraform output -json | ConvertFrom-Json
+                                  $userAssignedIdentityName = $terraformOutputsJson.Application_User_Assigned_Identity.value
+                                  $sqlServerFqdn = $terraformOutputsJson.Sql_Server_Fqdn.value
+                                  $sqlDatabaseName = $terraformOutputsJson.Sql_Database_Name.value
+
+                                  Write-Output "### User Assigned Identity Name ###"
+                                  Write-Output $terraformOutputsJson.Application_User_Assigned_Identity.value
+                                  Write-Output "### SQL Server Values ###"
+                                  Write-Output $terraformOutputsJson.Sql_Server_Fqdn.value
+                                  Write-Output $terraformOutputsJson.Sql_Database_Name.value
+
+                                  Write-Host "##vso[task.setvariable variable=userAssignedIdentityName;isOutput=true]$($terraformOutputsJson.Application_User_Assigned_Identity.value)"
+                                  Write-Host "##vso[task.setvariable variable=postgresqlServerName;isOutput=true]$($terraformOutputsJson.Postgres_Server_Name.value)"
+                                  Write-Host "##vso[task.setvariable variable=postgresqlDatabaseName;isOutput=true]$($terraformOutputsJson.Postgres_Database_Name.value)"
+                                  Write-Host "##vso[task.setvariable variable=postgresqlAdminUsername;isOutput=true]$($terraformOutputsJson.Postgres_Admin_Username.value)"
+                                  Write-Host "##vso[task.setvariable variable=postgresqlAdminPassword;isOutput=true]$($terraformOutputsJson.Postgres_Admin_Password.value)"
+                              env:
+                                ARM_ACCESS_KEY: $(arm_access_key)
+
+  - ${{ each environment in parameters.environments }}:
+      - ${{ if or(eq(parameters['deploy_sql_schema'], true), eq(parameters['deploy_database_permissions'], true))}}:
+          - stage: deploy_${{ environment.short }}_db_schema
+            displayName: ${{ environment.name }} Database Configuration
+            ${{ if eq(environment.name, 'Production')}}:
+              condition: and(notin(variables['Build.Reason'], 'PullRequest'), and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), succeeded()))
+            ${{ else }}:
+              condition: and(notin(variables['Build.Reason'], 'PullRequest'), and(or(eq(${{ parameters.deploy_sql_schema }}, true), eq(${{ parameters.deploy_database_permissions }}, true)), succeeded()))
+            pool:
+              name: ss-build-${{ environment.short }}-01
+            dependsOn:
+              - deploy_${{ environment.short }}
+            jobs:
+              - deployment: deploy_${{ environment.short }}_db_config
+                displayName: Deploy ${{ environment.name }} Database Configuration
+                container:
+                  image: acrsdsprd01.azurecr.io/${{ variables.app_deployment_container }}
+                  endpoint: acrsdsprd01
+                variables:
+                  userAssignedIdentityName: $[ stageDependencies.deploy_${{ environment.short }}.deploy_${{ environment.short }}_infra.outputs['deploy_${{ environment.short }}_infra.terraform_output.userAssignedIdentityName'] ]
+                  postgresqlServerName: $[ stageDependencies.deploy_${{ environment.short }}.deploy_${{ environment.short }}_infra.outputs['deploy_${{ environment.short }}_infra.terraform_output.postgresqlServerName'] ]
+                  postgresqlDatabaseName: $[ stageDependencies.deploy_${{ environment.short }}.deploy_${{ environment.short }}_infra.outputs['deploy_${{ environment.short }}_infra.terraform_output.postgresqlDatabaseName'] ]
+                  postgresqlAdminUsername: $[ stageDependencies.deploy_${{ environment.short }}.deploy_${{ environment.short }}_infra.outputs['deploy_${{ environment.short }}_infra.terraform_output.postgresqlAdminUsername'] ]
+                  postgresqlAdminPassword: $[ stageDependencies.deploy_${{ environment.short }}.deploy_${{ environment.short }}_infra.outputs['deploy_${{ environment.short }}_infra.terraform_output.postgresqlAdminPassword'] ]
+                  service_connection: "ado-${{ variables.service_name }}-app-${{ environment.short }}-01"
+                environment: "${{ variables.app_name }}-${{ environment.name }}"
+                strategy:
+                  runOnce:
+                    deploy:
+                      steps:
+                        - checkout: self
+                        - download: none
+                        - template: templates/PostgreSQL-AddContainerAppIdentity.yml
+                          parameters:
+                            service_connection: ${{ variables.service_connection }}
+                            postgresqlServerName: $(variables.postgresqlServerName)
+                            postgresqlDatabaseName: $(variables.postgresqlDatabaseName)
+                            userAssignedIdentityName: $(variables.userAssignedIdentityName)
+                        - checkout: self
+                        - checkout: PipelineTemplates
+                        - bash: |
+                            pip install poetry
+                            export PATH=$PATH:$HOME/.poetry/bin
+                            poetry config virtualenvs.in-project false
+                            poetry config http-basic.azure $(PrivateRepoUser) $(PrivateRepoToken)
+                            poetry config http-basic.azure-artifacts $(PrivateRepoUser) $(PrivateRepoToken)
+                            poetry config http-basic.brit-py system@britinsurance.com $(BRIT_PY_PAT)
+                            poetry install
+                          workingDirectory: "$(Build.SourcesDirectory)/mup-cyber-rater-api-source/source"
+                          displayName: "Install Pipeline Dependencies"
+
+                        - ${{ if eq(parameters['deploy_sql_schema'], true)}}:
+                            - template: postgresql/postgresql.run.alembic.yml@PipelineTemplates
+                              parameters:
+                                service_connection: ${{ variables.service_connection }}
+                                postgresql_name: $(postgresqlServerName)
+                                database: $(postgresqlDatabaseName)
+                                alembic_path: mup-cyber-rater-api-source/source
+                            - template: postgresql/postgresql.create.appidentity.yml@PipelineTemplates
+                              parameters:
+                                service_connection: ${{ variables.service_connection }}
+                                user_assigned_identity: $(userAssignedIdentityName)
+                                postgresql_name: $(postgresqlServerName)
+                                database: $(postgresqlDatabaseName)
+
+                        - ${{ if eq(parameters['deploy_database_permissions'], true)}}:
+                            - template: postgresql/postgresql.create.logins.yml@PipelineTemplates
+                              parameters:
+                                service_connection: ${{ variables.service_connection }}
+                                postgresql_server_name: $(postgresqlServerName)
+                                postgresql_access:
+                                  - SEC-mup-cyber-data-reader-${{ environment.short }}
+
+                            - template: postgresql/postgresql.assign.role.yml@PipelineTemplates
+                              parameters:
+                                service_connection: ${{ variables.service_connection }}
+                                postgresql_server_name: $(postgresqlServerName)
+                                database: $(postgresqlDatabaseName)
+                                postgresql_access:
+                                  - SEC-mup-cyber-data-reader-${{ environment.short }}
+                                role: Read
+
+                          # - template: postgresql/postgresql.assign.role.yml@PipelineTemplates
+                          #   parameters:
+                          #     service_connection: ${{ variables.service_connection }}
+                          #     postgresql_server_name: $(postgresqlServerName)
+                          #     database: $(postgresqlDatabaseName)
+                          #     postgresql_access:
+                          #       - SEC-MUP-Cyber-Risk-${{ environment.short }}
+                          #     role: Write
