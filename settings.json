@@ -1,0 +1,72 @@
+{
+  "python.venvPath": "/Users/ankurshrivastava/Library/Caches/pypoetry/virtualenvs",
+  "python.terminal.activateEnvironment": true,
+  // General settings
+  "workbench.colorTheme": "Predawn",
+  "workbench.iconTheme": "ayu",
+  "editor.fontFamily": "Source Code Pro",
+  "debug.console.fontFamily": "Source Code Pro",
+  "editor.fontWeight": "500",
+  "terminal.integrated.fontWeight": "600",
+  "workbench.settings.openDefaultSettings": true,
+  "workbench.settings.useSplitJSON": true,
+  "workbench.settings.editor": "json",
+  "workbench.startupEditor": "newUntitledFile",
+  "editor.tabSize": 4,
+  "editor.formatOnSave": true,
+  //"editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.quickSuggestionsDelay": 200,
+  "editor.dragAndDrop": false,
+  "editor.minimap.enabled": false,
+  "diffEditor.useInlineViewWhenSpaceIsLimited": false,
+  // Zen Mode settings
+  "zenMode.centerLayout": false,
+  "zenMode.fullScreen": false,
+  "zenMode.hideLineNumbers": false,
+
+  "files.exclude": {
+    "**/.git": false,
+    "**/.mypy_cache": true,
+  },
+  // Python settings
+  // "python.venvPath": "~/venvs",
+  "python.defaultInterpreterPath": "/opt/homebrew/bin/python3",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      // "source.fixAll": "explicit"
+      "source.organizeImports": "explicit",
+    },
+  },
+  "python.analysis.inlayHints.variableTypes": false,
+  "python.analysis.inlayHints.functionReturnTypes": false,
+  "python.analysis.typeCheckingMode": "off", // Disable Pylance Checking so MyPy Extension is only used
+  "python.analysis.autoFormatStrings": true,
+
+  // HTML, Jinja2, and Django settings
+  "django.snippets.use": false,
+  "[html][django-html][jinja][jinja-html]": {
+    "editor.defaultFormatter": "monosans.djlint",
+    "editor.tabSize": 2
+  },
+  "files.associations": {
+    "*.html": "django-html",
+    "*.svg": "html"
+  },
+  "emmet.includeLanguages": {
+    "django-html": "html",
+    "jinja-html": "html"
+  },
+  "djlint.useVenv": false,
+  "djlint.pythonPath": "/Users/ankurshrivastava/.local/share/uv/tools/djlint/bin/python",
+  "djlint.ignore": ["H031", "D004", "H023", "D018"],
+  "djlint.maxBlankLines": 1,
+  "djlint.lineBreakAfterMultilineTag": false,
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+}
