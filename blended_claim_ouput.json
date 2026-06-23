@@ -1,0 +1,19 @@
+{
+    "riskId": UUID, # b349849e-482e-4e42-bbbc-0d9f3f2d5517
+    "layers": [
+        {  
+            "layerId": UUID, # 08c9aff7-ccfd-4b5c-a6e4-b3d61eb988a9
+            "limit": float, # 25_000_000
+            "excess": float, # 50_000_000
+            "gnROL": float, # 27.52
+            "noLocation": str, # "100+"
+            "noYears": int, # 15
+            "priorTechAdjustment": float, # 10
+            "modelLC": float, # 829345
+            "experienceLC": float, # 0
+            "blendedLC": float, # 0
+            "adjustmentToApply": float # -0.5
+        },
+        ...
+     ]
+}
