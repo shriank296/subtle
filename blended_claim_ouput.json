@@ -17,3 +17,16 @@
         ...
      ]
 }
+
+class TechnicalAdjustmentService:
+
+    def __init__(
+        self,
+        quote_repository: QuoteRepository,
+        model_lc_repository: ModelLCRepository,
+        quote_assessment_client: QuoteAssessmentClient,
+        credibility_calculator: CredibilityCalculator,
+        technical_adjustment_calculator: TechnicalAdjustmentCalculator,
+        snapshot_repository: SnapshotRepository,
+    ):
+        ...
