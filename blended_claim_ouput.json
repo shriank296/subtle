@@ -30,3 +30,9 @@ class TechnicalAdjustmentService:
         snapshot_repository: SnapshotRepository,
     ):
         ...
+
+* Credibility calculations are delegated to CredibilityCalculator.
+* Adjustment calculations are delegated to TechnicalAdjustmentCalculator.
+* HTTP communication is delegated to QuoteAssessmentClient.
+* Blob operations are delegated to SnapshotRepository.
+* Service is unit tested using mocked dependencies.
