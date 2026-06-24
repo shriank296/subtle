@@ -1,0 +1,52 @@
+FROM python:3.14-slim
+
+ARG RELEASE=dev
+ARG BRIT_PY_PAT
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+WORKDIR /app
+EXPOSE 8080
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential=12.12 \
+    libffi-dev=3.4.8-2 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g 1000 app \
+  && useradd -m -u 1000 -g app -s /bin/bash app
+
+COPY --chown=app:app ./pyproject.toml /app
+COPY --chown=app:app ./app/ /app/app/
+
+RUN pip install --no-cache-dir poetry==2.4.1
+
+RUN poetry config http-basic.brit-py system@britinsurance.com $BRIT_PY_PAT \
+  && poetry config virtualenvs.create false \
+  && poetry install --no-interaction --without dev,docs,qa \
+  && rm -rf /root/.cache/pypoetry \
+  && chown -R app:app /app \
+  && chmod -R u=rwX,go=rX /usr/local/bin
+
+# hadolint ignore=DL3013
+RUN pip install --no-cache-dir opentelemetry-distro \
+  opentelemetry-exporter-otlp \
+  && opentelemetry-bootstrap -a install
+
+# OTEL default variables that are captured by App Insights.
+ENV OTEL_SERVICE_NAME=prcstor-pri-api
+ENV OTEL_SERVICE_VERSION=$RELEASE
+
+# OTEL capture all information in headers, sanatise auth.
+ENV OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST=".*"
+ENV OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE=".*"
+ENV OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS="Authorization"
+
+# This is used outside of OTEL.
+ENV RELEASE=$RELEASE
+
+USER app
+
+# hadolint ignore=SC2086
+CMD ["opentelemetry-instrument", "uvicorn", "app.main:main", "--factory", "--reload", "--host=0.0.0.0", "--port=8080", "--workers=1"]
