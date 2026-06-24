@@ -24,3 +24,8 @@ Setting AZURE_CONFIG_DIR env variable to: /__w/_temp/.azclitask-f8rLXQ
 2026-06-23T10:01:42.5364199Z ##[error]Script failed with exit code: 1
 2026-06-23T10:01:42.5369635Z [command]/usr/bin/az account clear
 2026-06-23T10:01:43.1199746Z ##[section]Finishing: Run Alembic
+
+
+Python executable: /usr/local/bin/python
+Python 3.13.1
+Poetry (version 1.7.1)
