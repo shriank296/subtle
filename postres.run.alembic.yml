@@ -1,0 +1,47 @@
+parameters:
+- name: postgresql_name
+  type: string
+- name: database
+  type: string
+- name: service_connection
+  type: string
+- name: alembic_path
+  type: string
+- name: user_assigned_identity
+  type: string
+- name: python_pat
+  type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: Run Alembic
+    inputs:
+      azureSubscription: ${{ parameters.service_connection }}
+      visibleAzLogin: false
+      addSpnToEnvironment: true
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: '$(Build.SourcesDirectory)/${{ parameters.alembic_path }}'
+      inlineScript: |
+        # Get SPN DisplayName
+        spnName=$(az ad sp list --filter "appId eq '$servicePrincipalId'" -o json | jq -r '.[].appDisplayName')
+
+        # Get Token
+        PGPASSWORD=$(az account get-access-token --resource https://ossrdbms-aad.database.windows.net | jq -r '.accessToken')
+
+        echo "Exporting DB_URL environment variables..."
+
+        export DB_USER="$spnName"
+        export DB_NAME="${{ parameters.database }}"
+        export DB_HOST="${{ parameters.postgresql_name }}.postgres.database.azure.com"
+        export DB_SSL_CONNECTION="require"
+        export DB_PASSWORD=$PGPASSWORD
+
+        echo "Installing Python dependencies..."
+        export PYTHONPATH="${PYTHONPATH}:/${{ parameters.alembic_path }}"
+        poetry config http-basic.brit-py system@britinsurance.com ${{ parameters.python_pat }} \
+          && poetry install --without qa,docs,dev --no-interaction
+        echo "Collected all Python dependencies"
+
+        poetry run alembic --version
+        poetry run alembic upgrade head
