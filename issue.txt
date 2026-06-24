@@ -1,0 +1,26 @@
+Setting AZURE_CONFIG_DIR env variable to: /__w/_temp/.azclitask-f8rLXQ
+2026-06-23T10:01:35.3702148Z Setting active cloud to: AzureCloud
+2026-06-23T10:01:35.3709494Z [command]/usr/bin/az cloud set -n AzureCloud
+2026-06-23T10:01:37.6622837Z [command]/usr/bin/az login --service-principal -u *** --password=*** --tenant 8cee18df-5e2a-4664-8d07-0566ffea6dcd --allow-no-subscriptions --output none
+2026-06-23T10:01:38.6190009Z [command]/usr/bin/az account set --subscription 6b9be68e-bdb7-4554-a496-ff83ddb5f232
+2026-06-23T10:01:39.0457279Z [command]/usr/bin/bash /__w/_temp/azureclitaskscript1782208895127.sh
+2026-06-23T10:01:40.4083807Z Exporting DB_URL environment variables...
+2026-06-23T10:01:40.4084225Z Installing Python dependencies...
+2026-06-23T10:01:40.9201525Z Using a plaintext file to store credentials
+2026-06-23T10:01:41.3729193Z The currently activated Python version 3.13.1 is not supported by the project (>=3.14.0,<3.15.0).
+2026-06-23T10:01:41.3729666Z Trying to find and use a compatible version. 
+2026-06-23T10:01:41.4373296Z 
+2026-06-23T10:01:41.4374069Z Poetry was unable to find a compatible version. If you have one, you can explicitly use it via the "env use" command.
+2026-06-23T10:01:41.4854631Z Collected all Python dependencies
+2026-06-23T10:01:41.8873824Z The currently activated Python version 3.13.1 is not supported by the project (>=3.14.0,<3.15.0).
+2026-06-23T10:01:41.8874332Z Trying to find and use a compatible version. 
+2026-06-23T10:01:41.9499981Z 
+2026-06-23T10:01:41.9500746Z Poetry was unable to find a compatible version. If you have one, you can explicitly use it via the "env use" command.
+2026-06-23T10:01:42.4223625Z The currently activated Python version 3.13.1 is not supported by the project (>=3.14.0,<3.15.0).
+2026-06-23T10:01:42.4224416Z Trying to find and use a compatible version. 
+2026-06-23T10:01:42.4854744Z 
+2026-06-23T10:01:42.4855970Z Poetry was unable to find a compatible version. If you have one, you can explicitly use it via the "env use" command.
+2026-06-23T10:01:42.5334585Z 
+2026-06-23T10:01:42.5364199Z ##[error]Script failed with exit code: 1
+2026-06-23T10:01:42.5369635Z [command]/usr/bin/az account clear
+2026-06-23T10:01:43.1199746Z ##[section]Finishing: Run Alembic
